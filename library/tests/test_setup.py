@@ -1,5 +1,5 @@
 import sys
-import mock
+from unittest import mock
 import pytest
 import struct
 
@@ -31,9 +31,11 @@ class MockSerial():
 
 
 def _mock():
-    sys.modules['RPi'] = mock.Mock()
-    sys.modules['RPi.GPIO'] = mock.Mock()
-    sys.modules['serial'] = mock.Mock()
+    sys.modules['digitalio'] = mock.Mock()
+    sys.modules['digitalio.DigitalInOut'] = mock.Mock()
+    sys.modules['digitalio.Direction'] = mock.Mock()
+    sys.modules['busio'] = mock.Mock()
+    sys.modules['board'] = mock.Mock()
 
 
 def test_setup():

@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 from pms5003 import PMS5003
 
 print("""specific.py - Continously print a specific data value.

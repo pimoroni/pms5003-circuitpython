@@ -1,8 +1,9 @@
-import RPi.GPIO as GPIO
-import serial
 import struct
 import time
 
+import board
+import busio
+from digitalio import DigitalInOut, Direction
 
 __version__ = '0.0.4'
 
@@ -84,33 +85,38 @@ PM10 ug/m3 (atmos env):                                        {}
 
 
 class PMS5003():
-    def __init__(self, device='/dev/ttyAMA0', baudrate=9600, pin_enable=22, pin_reset=27):
-        self._serial = None
-        self._device = device
+    def __init__(self, baudrate=9600, pin_enable=board.D10, pin_reset=board.D11):
+        self._uart = None
         self._baudrate = baudrate
         self._pin_enable = pin_enable
+        self._enable = None
         self._pin_reset = pin_reset
+        self._reset = None
         self.setup()
 
     def setup(self):
-        GPIO.setwarnings(False)
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self._pin_enable, GPIO.OUT, initial=GPIO.HIGH)
-        GPIO.setup(self._pin_reset, GPIO.OUT, initial=GPIO.HIGH)
+        self._enable = DigitalInOut(self._pin_enable)
+        self._enable.direction = Direction.OUTPUT
+        self._enable.value = True
+        
+        self._reset = DigitalInOut(self._pin_reset)
+        self._reset.direction = Direction.OUTPUT
+        self._reset.value = True
+        
 
-        if self._serial is not None:
-            self._serial.close()
+        if self._uart is not None:
+            self._uart.deinit()
 
-        self._serial = serial.Serial(self._device, baudrate=self._baudrate, timeout=4)
+        self._uart = busio.UART(board.TX, board.RX, baudrate=self._baudrate, timeout=4)
 
         self.reset()
 
     def reset(self):
         time.sleep(0.1)
-        GPIO.output(self._pin_reset, GPIO.LOW)
-        self._serial.flushInput()
+        self._reset.value = False
+        self._uart.reset_input_buffer()
         time.sleep(0.1)
-        GPIO.output(self._pin_reset, GPIO.HIGH)
+        self._reset.value = True
 
     def read(self):
         start = time.time()
@@ -120,19 +126,19 @@ class PMS5003():
             if elapsed > 5:
                 raise ReadTimeoutError("PMS5003 Read Timeout")
 
-            sof = bytearray(self._serial.read(2))
+            sof = bytearray(self._uart.read(2))
             if sof == PMS5003_SOF:
                 break
 
         checksum = sum(PMS5003_SOF)
 
-        data = bytearray(self._serial.read(2))  # Get frame length packet
+        data = bytearray(self._uart.read(2))  # Get frame length packet
         if len(data) != 2:
             raise SerialTimeoutError("PMS5003 Serial Timeout")
         checksum += sum(data)
         frame_length = struct.unpack(">H", data)[0]
 
-        raw_data = bytearray(self._serial.read(frame_length))
+        raw_data = bytearray(self._uart.read(frame_length))
         data = PMS5003Data(raw_data)
         # Don't include the checksum bytes in the checksum calculation
         checksum += sum(raw_data[:-2])

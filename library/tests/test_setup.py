@@ -1,5 +1,5 @@
 import sys
-import mock
+from unittest import mock
 import pytest
 import struct
 
@@ -31,9 +31,11 @@ class MockSerial():
 
 
 def _mock():
-    sys.modules['RPi'] = mock.Mock()
-    sys.modules['RPi.GPIO'] = mock.Mock()
-    sys.modules['serial'] = mock.Mock()
+    sys.modules['digitalio'] = mock.Mock()
+    sys.modules['digitalio.DigitalInOut'] = mock.Mock()
+    sys.modules['digitalio.Direction'] = mock.Mock()
+    sys.modules['busio'] = mock.Mock()
+    sys.modules['board'] = mock.Mock()
 
 
 def test_setup():
@@ -54,7 +56,7 @@ def test_read():
     _mock()
     import pms5003
     sensor = pms5003.PMS5003()
-    sensor._serial = MockSerial()
+    sensor._uart = MockSerial()
     data = sensor.read()
     data.pm_ug_per_m3(2.5)
 
@@ -63,7 +65,7 @@ def test_read_fail():
     _mock()
     import pms5003
     sensor = pms5003.PMS5003()
-    sensor._serial = MockSerialFail()
+    sensor._uart = MockSerialFail()
     with pytest.raises(pms5003.ReadTimeoutError):
         data = sensor.read()
         del data

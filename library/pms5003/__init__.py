@@ -5,6 +5,8 @@ import board
 import busio
 from digitalio import DigitalInOut, Direction
 
+import pimoroni_physical_feather_pins
+
 __version__ = '0.0.4'
 
 
@@ -85,7 +87,8 @@ PM10 ug/m3 (atmos env):                                        {}
 
 
 class PMS5003():
-    def __init__(self, baudrate=9600, pin_enable=board.D10, pin_reset=board.D11):
+    #def __init__(self, baudrate=9600, pin_enable=board.D10, pin_reset=board.D11):
+    def __init__(self, baudrate=9600, pin_enable=pimoroni_physical_feather_pins.pin22(), pin_reset=pimoroni_physical_feather_pins.pin23()):
         self._uart = None
         self._baudrate = baudrate
         self._pin_enable = pin_enable

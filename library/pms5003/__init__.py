@@ -129,19 +129,19 @@ class PMS5003():
             if elapsed > 5:
                 raise ReadTimeoutError("PMS5003 Read Timeout")
 
-            sof = bytearray(self._serial.read(2))
+            sof = bytearray(self._uart.read(2))
             if sof == PMS5003_SOF:
                 break
 
         checksum = sum(PMS5003_SOF)
 
-        data = bytearray(self._serial.read(2))  # Get frame length packet
+        data = bytearray(self._uart.read(2))  # Get frame length packet
         if len(data) != 2:
             raise SerialTimeoutError("PMS5003 Serial Timeout")
         checksum += sum(data)
         frame_length = struct.unpack(">H", data)[0]
 
-        raw_data = bytearray(self._serial.read(frame_length))
+        raw_data = bytearray(self._uart.read(frame_length))
         data = PMS5003Data(raw_data)
         # Don't include the checksum bytes in the checksum calculation
         checksum += sum(raw_data[:-2])

@@ -122,12 +122,12 @@ class PMS5003():
         self._reset.value = True
 
     def read(self):
-        start = time.time()
+        start = time.monotonic()
 
         sof_index = 0
 
         while True:
-            elapsed = time.time() - start
+            elapsed = time.monotonic() - start
             if elapsed > 5:
                 raise ReadTimeoutError("PMS5003 Read Timeout: Could not find start of frame")
 

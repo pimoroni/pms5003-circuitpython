@@ -7,13 +7,17 @@ from digitalio import DigitalInOut, Direction
 
 import pimoroni_physical_feather_pins
 
-__version__ = '0.0.4'
+__version__ = '0.0.6'
 
 
 PMS5003_SOF = bytearray(b'\x42\x4d')
 
 
 class ChecksumMismatchError(RuntimeError):
+    pass
+
+
+class FrameLengthError(RuntimeError):
     pass
 
 
@@ -26,10 +30,34 @@ class SerialTimeoutError(RuntimeError):
 
 
 class PMS5003Data():
-    def __init__(self, raw_data):
+    FRAME_LEN = 32
+    DATA_LEN = FRAME_LEN - 4  # includes checksum
+
+    @classmethod
+    def check_data_len(cls, raw_data_len, desc="Data"):
+        if raw_data_len != cls.DATA_LEN:
+            raise FrameLengthError(desc + " too "
+                                   + ("short" if raw_data_len < cls.DATA_LEN else "long")
+                                   + " {:d} bytes".format(raw_data_len))
+
+
+    def __init__(self, raw_data, *, frame_length_bytes=None):
+        raw_data_len = len(raw_data)
+        self.check_data_len(raw_data_len)
         self.raw_data = raw_data
         self.data = struct.unpack(">HHHHHHHHHHHHHH", raw_data)
         self.checksum = self.data[13]
+
+        # Don't include the checksum bytes in the checksum calculation
+        checksum = sum(PMS5003_SOF) + sum(raw_data[:-2])
+        if frame_length_bytes is None:
+            checksum += (raw_data_len >> 256) + (raw_data_len & 0xff)
+        else:
+            checksum += sum(frame_length_bytes)
+        if checksum != self.checksum:
+            raise ChecksumMismatchError("PMS5003 Checksum Mismatch {} != {}".format(checksum,
+                                                                                    self.checksum))
+
 
     def pm_ug_per_m3(self, size, atmospheric_environment=False):
         if atmospheric_environment:
@@ -101,11 +129,11 @@ class PMS5003():
         self._enable = DigitalInOut(self._pin_enable)
         self._enable.direction = Direction.OUTPUT
         self._enable.value = True
-        
+
         self._reset = DigitalInOut(self._pin_reset)
         self._reset.direction = Direction.OUTPUT
         self._reset.value = True
-        
+
 
         if self._serial is not None:
             self._serial.deinit()
@@ -144,23 +172,14 @@ class PMS5003():
             else:
                 sof_index = 0
 
-        checksum = sum(PMS5003_SOF)
-
-        data = bytearray(self._serial.read(2))  # Get frame length packet
-        if len(data) != 2:
+        len_data = bytearray(self._serial.read(2))  # Get frame length packet
+        if len(len_data) != 2:
             raise SerialTimeoutError("PMS5003 Read Timeout: Could not find length packet")
-        checksum += sum(data)
-        frame_length = struct.unpack(">H", data)[0]
+        frame_length = struct.unpack(">H", len_data)[0]
+        PMS5003Data.check_data_len(frame_length, desc="Length field")
 
         raw_data = bytearray(self._serial.read(frame_length))
         if len(raw_data) != frame_length:
             raise SerialTimeoutError("PMS5003 Read Timeout: Invalid frame length. Got {} bytes, expected {}.".format(len(raw_data), frame_length))
 
-        data = PMS5003Data(raw_data)
-        # Don't include the checksum bytes in the checksum calculation
-        checksum += sum(raw_data[:-2])
-
-        if checksum != data.checksum:
-            raise ChecksumMismatchError("PMS5003 Checksum Mismatch {} != {}".format(checksum, data.checksum))
-
-        return data
+        return PMS5003Data(raw_data, frame_length_bytes=len_data)

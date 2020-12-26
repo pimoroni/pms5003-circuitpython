@@ -4,7 +4,7 @@ import pytest
 import struct
 
 
-# PMS5003 as seen on logic analayser
+# PMS5003 as seen from logic analayser
 goodframe1 = (b'\x42\x4d'
               b'\x00\x1c'
               b'\x00\x02\x00\x04\x00\x04\x00\x02\x00\x04\x00\x04\x02\xe8\x00\xd4\x00\x20\x00\x00\x00\x00\x00\x00\x97\x00'
@@ -15,7 +15,7 @@ badframe1 = (goodframe1[0:corrupt_pos]
              + bytes([~goodframe1[corrupt_pos] & 0xff])
              + goodframe1[corrupt_pos+1:])
 
-# PMS5003 from REPL
+# PMS5003 from REPL on Feather nRF52840 Express
 goodframe2 = b'BM\x00\x1c\x00\x07\x00\t\x00\t\x00\x07\x00\t\x00\t\x05.\x01\x8a\x004\x00\x00\x00\x00\x00\x00\x97\x00\x02f'
 
 
@@ -46,6 +46,8 @@ class MockSerial():
 
 
 class MockSerialArbitrary():
+    """A simulator for serial with the ability to feed the internal,
+       fixed-size receieve buffer with data."""
     def __init__(self, rx_buf_size=64):
         self.rx_buf_size = rx_buf_size
         self.buffer = bytearray(self.rx_buf_size)
@@ -134,6 +136,42 @@ def test_checksum_fail():
         data = sensor.read()
 
 
+def test_data_checksum_pass():
+    """Testing the checksum verification in PMS5003Data constructor."""
+    _mock()
+    import pms5003
+    data = pms5003.PMS5003Data(goodframe1[4:],
+                               frame_length_bytes=goodframe1[2:4])
+    assert data.pm_ug_per_m3(2.5) == 4
+
+
+def test_data_checksum_pass_alt():
+    """Testing the checksum verification in PMS5003Data constructor
+       without passing the frame_length_bytes."""
+    _mock()
+    import pms5003
+    data = pms5003.PMS5003Data(goodframe1[4:])
+    assert data.pm_ug_per_m3(2.5) == 4
+
+
+def test_data_checksum_fail():
+    """Testing the checksum verification in PMS5003Data constructor."""
+    _mock()
+    import pms5003
+    with pytest.raises(pms5003.ChecksumMismatchError):
+        data = pms5003.PMS5003Data(badframe1[4:],
+                                   frame_length_bytes=badframe1[2:4])
+
+
+def test_data_checksum_fail_alt():
+    """Testing the checksum verification in PMS5003Data constructor
+       without passing the frame_length_bytes."""
+    _mock()
+    import pms5003
+    with pytest.raises(pms5003.ChecksumMismatchError):
+        data = pms5003.PMS5003Data(badframe1[4:])
+
+
 def test_buffer_full_truncation():
     """Simulates the serial object's buffer being full and truncating a frame."""
     _mock()
@@ -184,8 +222,8 @@ def test_buffer_full_badframelen_long1():
     # Now add a real frame to truncated leftovers in the buffer
     # to cause a bogus frame length of 16973 bytes
     sensor._serial.simulateRx(goodframe1)
-    # TODO - this will throw a new exception when fixed
-    data = sensor.read()
+    with pytest.raises(pms5003.FrameLengthError):
+        data = sensor.read()
 
 
 def test_buffer_badframelen_long2():
@@ -208,8 +246,8 @@ def test_buffer_badframelen_long2():
     # this has a very high probability of the checksum failing
     sensor._serial.simulateRx(goodframe1[11:])
     sensor._serial.simulateRx(goodframe1)
-    # TODO - this will throw a new exception when fixed
-    data = sensor.read()
+    with pytest.raises(pms5003.FrameLengthError):
+        data = sensor.read()
 
 
 def test_buffer_full_badframelen_short():
@@ -231,5 +269,5 @@ def test_buffer_full_badframelen_short():
     # this has a very high probability of the checksum failing
     sensor._serial.simulateRx(goodframe1[10:])
     sensor._serial.simulateRx(goodframe1)
-    #with pytest.raises(pms5003.ChecksumMismatchError):
-    data = sensor.read()
+    with pytest.raises(pms5003.FrameLengthError):
+        data = sensor.read()

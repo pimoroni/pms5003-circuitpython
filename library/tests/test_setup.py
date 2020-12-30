@@ -5,18 +5,19 @@ import struct
 
 
 # PMS5003 as seen from logic analayser
-goodframe1 = (b'\x42\x4d'
+GOODFRAME1 = (b'\x42\x4d'
               b'\x00\x1c'
               b'\x00\x02\x00\x04\x00\x04\x00\x02\x00\x04\x00\x04\x02\xe8\x00\xd4\x00\x20\x00\x00\x00\x00\x00\x00\x97\x00'
               b'\x03\x34')
 
-corrupt_pos = len(goodframe1) // 2
-badframe1 = (goodframe1[0:corrupt_pos]
-             + bytes([~goodframe1[corrupt_pos] & 0xff])
-             + goodframe1[corrupt_pos+1:])
+CORRUPTION_POS = len(GOODFRAME1) // 2
+# Make a bad frame by inverting bits in one byte
+BADFRAME1 = (GOODFRAME1[0:CORRUPTION_POS]
+             + bytes([~GOODFRAME1[CORRUPTION_POS] & 0xff])
+             + GOODFRAME1[CORRUPTION_POS+1:])
 
 # PMS5003 from REPL on Feather nRF52840 Express
-goodframe2 = b'BM\x00\x1c\x00\x07\x00\t\x00\t\x00\x07\x00\t\x00\t\x05.\x01\x8a\x004\x00\x00\x00\x00\x00\x00\x97\x00\x02f'
+GOODFRAME2 = b'BM\x00\x1c\x00\x07\x00\t\x00\t\x00\x07\x00\t\x00\t\x05.\x01\x8a\x004\x00\x00\x00\x00\x00\x00\x97\x00\x02f'
 
 
 class MockSerialFail():
@@ -25,6 +26,16 @@ class MockSerialFail():
 
     def read(self, length):
         return b'\x00' * length
+
+    def reset_input_buffer(self):
+        pass
+
+    def deinit(self):
+        pass
+
+    @property
+    def in_waiting(self):
+        return 32
 
 
 class MockSerial():
@@ -44,6 +55,16 @@ class MockSerial():
             self.ptr = 0
         return result
 
+    def reset_input_buffer(self):
+        pass
+
+    def deinit(self):
+        pass
+
+    @property
+    def in_waiting(self):
+        return len(self.data) - self.ptr
+
 
 class MockSerialArbitrary():
     """A simulator for serial with the ability to feed the internal,
@@ -52,9 +73,9 @@ class MockSerialArbitrary():
         self.rx_buf_size = rx_buf_size
         self.buffer = bytearray(self.rx_buf_size)
         self.buflen = 0
+        ### TODO - ponder delay functionality
 
-
-    def simulateRx(self, data):
+    def simulate_rx(self, data):
         """Add data to the buffer, discarding anything which
            does not fit to simulate overruns."""
         buffer_add_size = min(len(data), self.rx_buf_size - self.buflen)
@@ -63,7 +84,6 @@ class MockSerialArbitrary():
             self.buflen += buffer_add_size
         return buffer_add_size
 
-
     def read(self, length):
         read_size = min(length, self.rx_buf_size, self.buflen)
         result = bytes(self.buffer[0:read_size])
@@ -71,6 +91,16 @@ class MockSerialArbitrary():
         if self.buflen > 0:
             self.buffer[0:self.buflen] = self.buffer[read_size:read_size+self.buflen]
         return result
+
+    def reset_input_buffer(self):
+        pass
+
+    def deinit(self):
+        pass
+
+    @property
+    def in_waiting(self):
+        return self.buflen
 
 
 def _mock():
@@ -85,22 +115,22 @@ def _mock():
 def test_setup():
     _mock()
     import pms5003
-    sensor = pms5003.PMS5003()
+    sensor = pms5003.PMS5003(serial=MockSerial())
     del sensor
 
 
 def test_double_setup():
     _mock()
     import pms5003
-    sensor = pms5003.PMS5003()
-    sensor.setup()
+    serial = MockSerial()
+    sensor = pms5003.PMS5003(serial=serial)
+    sensor.setup(serial)
 
 
 def test_read():
     _mock()
     import pms5003
-    sensor = pms5003.PMS5003()
-    sensor._serial = MockSerial()
+    sensor = pms5003.PMS5003(serial=MockSerial())
     data = sensor.read()
     data.pm_ug_per_m3(2.5)
 
@@ -108,8 +138,7 @@ def test_read():
 def test_read_fail():
     _mock()
     import pms5003
-    sensor = pms5003.PMS5003()
-    sensor._serial = MockSerialFail()
+    sensor = pms5003.PMS5003(serial=MockSerialFail())
     with pytest.raises(pms5003.ReadTimeoutError):
         data = sensor.read()
         del data
@@ -118,9 +147,9 @@ def test_read_fail():
 def test_checksum_pass():
     _mock()
     import pms5003
-    sensor = pms5003.PMS5003()
-    sensor._serial = MockSerialArbitrary()
-    sensor._serial.simulateRx(goodframe1)
+    serial = MockSerialArbitrary()
+    serial.simulate_rx(GOODFRAME1)
+    sensor = pms5003.PMS5003(serial=serial)
     data = sensor.read()
     assert data.pm_ug_per_m3(2.5) == 4
 
@@ -128,9 +157,12 @@ def test_checksum_pass():
 def test_checksum_fail():
     _mock()
     import pms5003
-    sensor = pms5003.PMS5003()
-    sensor._serial = MockSerialArbitrary()
-    sensor._serial.simulateRx(badframe1)
+    serial = MockSerialArbitrary()
+    serial.simulate_rx(GOODFRAME1)
+    sensor = pms5003.PMS5003(serial=serial)
+    data = sensor.read()
+    assert data.pm_ug_per_m3(2.5) == 4
+    serial.simulate_rx(BADFRAME1)
 
     with pytest.raises(pms5003.ChecksumMismatchError):
         data = sensor.read()
@@ -140,8 +172,8 @@ def test_data_checksum_pass():
     """Testing the checksum verification in PMS5003Data constructor."""
     _mock()
     import pms5003
-    data = pms5003.PMS5003Data(goodframe1[4:],
-                               frame_length_bytes=goodframe1[2:4])
+    data = pms5003.PMS5003Data(GOODFRAME1[4:],
+                               frame_length_bytes=GOODFRAME1[2:4])
     assert data.pm_ug_per_m3(2.5) == 4
 
 
@@ -150,7 +182,7 @@ def test_data_checksum_pass_alt():
        without passing the frame_length_bytes."""
     _mock()
     import pms5003
-    data = pms5003.PMS5003Data(goodframe1[4:])
+    data = pms5003.PMS5003Data(GOODFRAME1[4:])
     assert data.pm_ug_per_m3(2.5) == 4
 
 
@@ -159,8 +191,8 @@ def test_data_checksum_fail():
     _mock()
     import pms5003
     with pytest.raises(pms5003.ChecksumMismatchError):
-        data = pms5003.PMS5003Data(badframe1[4:],
-                                   frame_length_bytes=badframe1[2:4])
+        data = pms5003.PMS5003Data(BADFRAME1[4:],
+                                   frame_length_bytes=BADFRAME1[2:4])
 
 
 def test_data_checksum_fail_alt():
@@ -169,18 +201,18 @@ def test_data_checksum_fail_alt():
     _mock()
     import pms5003
     with pytest.raises(pms5003.ChecksumMismatchError):
-        data = pms5003.PMS5003Data(badframe1[4:])
+        data = pms5003.PMS5003Data(BADFRAME1[4:])
 
 
 def test_buffer_full_truncation():
     """Simulates the serial object's buffer being full and truncating a frame."""
     _mock()
     import pms5003
-    sensor = pms5003.PMS5003()
-    sensor._serial = MockSerialArbitrary(rx_buf_size=80)
-    sensor._serial.simulateRx(goodframe1)
-    sensor._serial.simulateRx(goodframe2)
-    sensor._serial.simulateRx(goodframe1)
+    serial = MockSerialArbitrary(rx_buf_size=80)
+    serial.simulate_rx(GOODFRAME1)
+    sensor = pms5003.PMS5003(serial=serial)
+    serial.simulate_rx(GOODFRAME2)
+    serial.simulate_rx(GOODFRAME1)
     data = sensor.read()
     assert data.pm_ug_per_m3(2.5) == 4
     data = sensor.read()
@@ -194,11 +226,11 @@ def test_buffer_full_lucky():
        by good fortunate prevents truncation of subsequent data frame."""
     _mock()
     import pms5003
-    sensor = pms5003.PMS5003()
-    sensor._serial = MockSerialArbitrary(rx_buf_size=64)
-    sensor._serial.simulateRx(goodframe1) # 32 bytes, fits
-    sensor._serial.simulateRx(goodframe2) # 32 bytes, fits
-    sensor._serial.simulateRx(goodframe1) # 32 bytes, discarded completely
+    serial = MockSerialArbitrary(rx_buf_size=64)
+    serial.simulate_rx(GOODFRAME1) # 32 bytes, fits
+    sensor = pms5003.PMS5003(serial=serial)
+    serial.simulate_rx(GOODFRAME2) # 32 bytes, fits
+    serial.simulate_rx(GOODFRAME1) # 32 bytes, discarded completely
     data = sensor.read()
     assert data.pm_ug_per_m3(2.5) == 4
     data = sensor.read()
@@ -212,16 +244,16 @@ def test_buffer_full_badframelen_long1():
       truncating a frame and then a good frame being appended to that stub."""
     _mock()
     import pms5003
-    sensor = pms5003.PMS5003()
-    sensor._serial = MockSerialArbitrary(rx_buf_size=34)
-    sensor._serial.simulateRx(goodframe1)
-    sensor._serial.simulateRx(goodframe1)
+    serial = MockSerialArbitrary(rx_buf_size=34)
+    serial.simulate_rx(GOODFRAME1)
+    sensor = pms5003.PMS5003(serial=serial)
+    serial.simulate_rx(GOODFRAME1)
     data = sensor.read()
     assert data.pm_ug_per_m3(2.5) == 4
 
     # Now add a real frame to truncated leftovers in the buffer
     # to cause a bogus frame length of 16973 bytes
-    sensor._serial.simulateRx(goodframe1)
+    serial.simulate_rx(GOODFRAME1)
     with pytest.raises(pms5003.FrameLengthError):
         data = sensor.read()
 
@@ -232,10 +264,10 @@ def test_buffer_badframelen_long2():
       resulting in a long frame length field."""
     _mock()
     import pms5003
-    sensor = pms5003.PMS5003()
-    sensor._serial = MockSerialArbitrary(rx_buf_size=34)
-    sensor._serial.simulateRx(goodframe1)
-    sensor._serial.simulateRx(goodframe1)
+    serial = MockSerialArbitrary(rx_buf_size=34)
+    serial.simulate_rx(GOODFRAME1)
+    sensor = pms5003.PMS5003(serial=serial)
+    serial.simulate_rx(GOODFRAME1)
     data = sensor.read()
     assert data.pm_ug_per_m3(2.5) == 4
 
@@ -244,8 +276,8 @@ def test_buffer_badframelen_long2():
     # could happen if library is reading from a full
     # buffer in the middle of the PMS5003 sending data
     # this has a very high probability of the checksum failing
-    sensor._serial.simulateRx(goodframe1[11:])
-    sensor._serial.simulateRx(goodframe1)
+    serial.simulate_rx(GOODFRAME1[11:])
+    serial.simulate_rx(GOODFRAME1)
     with pytest.raises(pms5003.FrameLengthError):
         data = sensor.read()
 
@@ -256,10 +288,10 @@ def test_buffer_full_badframelen_short():
       resulting in a short frame length field."""
     _mock()
     import pms5003
-    sensor = pms5003.PMS5003()
-    sensor._serial = MockSerialArbitrary(rx_buf_size=34)
-    sensor._serial.simulateRx(goodframe1)
-    sensor._serial.simulateRx(goodframe1)
+    serial = MockSerialArbitrary(rx_buf_size=34)
+    serial.simulate_rx(GOODFRAME1)
+    sensor = pms5003.PMS5003(serial=serial)
+    serial.simulate_rx(GOODFRAME1)
     data = sensor.read()
     data.pm_ug_per_m3(2.5)
 
@@ -267,7 +299,7 @@ def test_buffer_full_badframelen_short():
     # this will be rare but could happen if library is reading from full
     # buffer in the middle of PMS5003 sending data
     # this has a very high probability of the checksum failing
-    sensor._serial.simulateRx(goodframe1[10:])
-    sensor._serial.simulateRx(goodframe1)
+    serial.simulate_rx(GOODFRAME1[10:])
+    serial.simulate_rx(GOODFRAME1)
     with pytest.raises(pms5003.FrameLengthError):
         data = sensor.read()

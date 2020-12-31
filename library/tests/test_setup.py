@@ -1,4 +1,5 @@
 import sys
+import time
 from unittest import mock
 import pytest
 import struct
@@ -18,6 +19,9 @@ BADFRAME1 = (GOODFRAME1[0:CORRUPTION_POS]
 
 # PMS5003 from REPL on Feather nRF52840 Express
 GOODFRAME2 = b'BM\x00\x1c\x00\x07\x00\t\x00\t\x00\x07\x00\t\x00\t\x05.\x01\x8a\x004\x00\x00\x00\x00\x00\x00\x97\x00\x02f'
+
+PASSIVE_REQ = b'\x42\x4d\xe1\x00\x00\x01\x70'
+PASSIVE_RESP = b'\x42\x4d\x00\x04\xe1\x00\x01\x74'
 
 
 class MockSerialFail():
@@ -69,11 +73,12 @@ class MockSerial():
 class MockSerialArbitrary():
     """A simulator for serial with the ability to feed the internal,
        fixed-size receieve buffer with data."""
+
     def __init__(self, rx_buf_size=64):
         self.rx_buf_size = rx_buf_size
         self.buffer = bytearray(self.rx_buf_size)
         self.buflen = 0
-        ### TODO - ponder delay functionality
+        self.write_data = bytearray()
 
     def simulate_rx(self, data):
         """Add data to the buffer, discarding anything which
@@ -92,7 +97,12 @@ class MockSerialArbitrary():
             self.buffer[0:self.buflen] = self.buffer[read_size:read_size+self.buflen]
         return result
 
+    def write(self, data):
+        self.write_data.extend(data)
+
     def reset_input_buffer(self):
+        """This intentionally does not discard data in the buffer to
+           allow tests to add data beforehand."""
         pass
 
     def deinit(self):
@@ -100,6 +110,92 @@ class MockSerialArbitrary():
 
     @property
     def in_waiting(self):
+        return self.buflen
+
+
+class PMS5003Simulator():
+    """A partial simulator for serial connected to a PMS5003
+       with fixed-size receive buffer.
+       This uses real time so could be flaky if starved of CPU.
+       """
+    RESPONSES = {PASSIVE_REQ: PASSIVE_RESP}
+    INIT_DURATION = 2.6
+    ACTIVE_INTERVAL = 0.910
+
+    def __init__(self,
+                 rx_buf_size=64,
+                 timeout=4.0,
+                 time_func=time.time,
+                 init_duration=INIT_DURATION,
+                 active_interval=ACTIVE_INTERVAL):
+        self.rx_buf_size = rx_buf_size
+        self.buffer = bytearray(self.rx_buf_size)
+        self.buflen = 0
+        self.write_data = bytearray()
+        self.time_func = time_func
+        self.init_time = self.time_func()
+        self.firstframe_time = self.init_time + init_duration
+        self.mode = "active"
+        self.active_interval = active_interval
+        self.data_frames = 0
+        self.timeout = timeout
+
+    def _tick(self):
+        if self.mode != "active":
+            return
+        now = self.time_func()
+        frames_since_init = int((now - self.firstframe_time)
+                                / self.active_interval)
+        if frames_since_init <= self.data_frames:
+            return
+        for _ in range(frames_since_init - self.data_frames):
+            self.simulate_rx(GOODFRAME1)
+        self.data_frames = frames_since_init
+
+    def simulate_rx(self, data):
+        """Add data to the buffer, discarding anything which
+           does not fit to simulate overruns."""
+        buffer_add_size = min(len(data), self.rx_buf_size - self.buflen)
+        if buffer_add_size > 0:
+            self.buffer[self.buflen:self.buflen + buffer_add_size] = data[0:buffer_add_size]
+            self.buflen += buffer_add_size
+        return buffer_add_size
+
+    def read(self, length):
+        start_time = self.time_func()
+        while True:
+            self._tick()
+            read_size = min(length, self.rx_buf_size, self.buflen)
+            if self.timeout and read_size == 0:
+                if self.time_func() - start_time > self.timeout:
+                    break
+                else:
+                    continue
+            result = bytes(self.buffer[0:read_size])
+            self.buflen -= read_size
+            if self.buflen > 0:
+                self.buffer[0:self.buflen] = self.buffer[read_size:read_size+self.buflen]
+            return result
+        return b''
+
+    def write(self, data):
+        self.write_data.extend(data)
+        resp = self.RESPONSES.get(bytes(data))
+        print(bytes(data), "vs", self.RESPONSES, "resp=", resp)
+        if resp is not None:
+            self.simulate_rx(resp)
+        self._tick()
+
+    def reset_input_buffer(self):
+        self.buflen = 0
+        self._tick()
+
+    def deinit(self):
+        self.buflen = 0
+
+    @property
+    def in_waiting(self):
+        self._tick()
         return self.buflen
 
 
@@ -303,3 +399,34 @@ def test_buffer_full_badframelen_short():
     serial.simulate_rx(GOODFRAME1)
     with pytest.raises(pms5003.FrameLengthError):
         data = sensor.read()
+
+
+def test_active_mode_read():
+    """Test active mode using new simulator object.
+    """
+    _mock()
+    import pms5003
+    serial = PMS5003Simulator()
+    sensor = pms5003.PMS5003(serial=serial)
+    data1 = sensor.read()
+    data1.pm_ug_per_m3(2.5)
+
+    # This should block until new data is generated by simulator
+    data2 = sensor.read()
+    data2.pm_ug_per_m3(2.5)
+
+
+def test_passive_mode_read():
+    """Test the new passive mode using new simulator object
+       where responses are requested by polling.
+    """
+    _mock()
+    import pms5003
+    serial = PMS5003Simulator()
+    sensor = pms5003.PMS5003(serial=serial, mode='passive')
+    assert serial.write_data == PASSIVE_REQ
+    data1 = sensor.read()
+    data1.pm_ug_per_m3(2.5)
+    time.sleep(0.5)
+    data2 = sensor.read()
+    data2.pm_ug_per_m3(2.5)

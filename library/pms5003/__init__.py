@@ -245,7 +245,7 @@ class PMS5003():
 
     def _cmd_passive_read(self):
         """
-        Sends command to request a data frame whlie in 'passive' mode and immediately reads in frame
+        Sends command to request a data frame while in 'passive' mode and immediately reads in frame.
         """
         self._serial.reset_input_buffer()
         self._serial.write(self._build_cmd_frame(PMS5003_CMD_READ))
@@ -286,7 +286,7 @@ class PMS5003():
         # CircuitPython 6.0.0 on nRF52840 sometimes picks up 2 bogus bytes here
         start = time.monotonic()
         while True:
-            if self._serial.in_waiting >= PMS5003Data.FRAME_LEN:
+            if self.data_available():
                 break
             elapsed = time.monotonic() - start
             if elapsed > self.MAX_RESET_TIME:
@@ -308,6 +308,11 @@ class PMS5003():
 
         if self._serial is not None:
             self._serial.deinit()
+
+    def data_available(self):
+        """Returns boolean indicating if one or more data frames are waiting.
+           Only for use in active mode."""
+        return self._serial.in_waiting >= PMS5003Data.FRAME_LEN
 
     def read(self):
         if self._mode == 'passive':

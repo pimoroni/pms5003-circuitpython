@@ -414,6 +414,10 @@ def test_active_mode_read():
     import pms5003
     serial = PMS5003Simulator()
     sensor = pms5003.PMS5003(serial=serial)
+    
+    # The constructor waits for data but does not read it therefore this
+    # will always be True after the object is created successfully
+    assert sensor.data_available() is True
     data1 = sensor.read()
     data1.pm_ug_per_m3(2.5)
 

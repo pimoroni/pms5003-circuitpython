@@ -207,23 +207,27 @@ class PMS5003():
 
     def cmd_mode_passive(self):
         """
-        Sends command to device to enable 'passive' mode
-        In passive mode, data frames are only sent after a read command
+        Sends command to device to enable 'passive' mode.
+        In passive mode data frames are only sent in response to
+        a read command.
         """
         self._mode = 'passive'
 
         time.sleep(self.MIN_CMD_INTERVAL)
         self._serial.reset_input_buffer()
         self._serial.write(self._build_cmd_frame(PMS5003_CMD_MODE_PASSIVE))
-        ### TODO - this can fail because a Data frame can sneak in and give FrameLengthError
-        resp = self._read_data(PMS5003CmdResponse)
+        # In rare cases a single data frame sneaks in giving FrameLengthError
+        try:
+            resp = self._read_data(PMS5003CmdResponse)
+        except FrameLengthError:
+            resp = self._read_data(PMS5003CmdResponse)
         time.sleep(self.MIN_CMD_INTERVAL)
         return resp
 
     def cmd_mode_active(self):
         """
-        Sends command to device to enable 'active' mode
-        In active mode, data frames are sent repeatedly at intervals
+        Sends command to device to enable 'active' mode.
+        In active mode data frames are streamed continuously at intervals
         ranging from 200ms to 2.3 seconds.
         """
         self._mode = 'active'
@@ -231,8 +235,11 @@ class PMS5003():
         time.sleep(self.MIN_CMD_INTERVAL)
         self._serial.reset_input_buffer()
         self._serial.write(self._build_cmd_frame(PMS5003_CMD_MODE_ACTIVE))
-        ### TODO - this can fail because a Data frame can sneak in and give FrameLengthError
-        resp = self._read_data(PMS5003CmdResponse)
+        # In rare cases a single data frame sneaks in giving FrameLengthError
+        try:
+            resp = self._read_data(PMS5003CmdResponse)
+        except FrameLengthError:
+            resp = self._read_data(PMS5003CmdResponse)
         time.sleep(self.MIN_CMD_INTERVAL)
         return resp
 

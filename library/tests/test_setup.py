@@ -261,13 +261,46 @@ def test_checksum_fail():
     import pms5003
     serial = MockSerialArbitrary()
     serial.simulate_rx(GOODFRAME1)
-    sensor = pms5003.PMS5003(serial=serial)
+    sensor = pms5003.PMS5003(serial=serial, retries=0)
     data = sensor.read()
     assert data.pm_ug_per_m3(2.5) == 4
     serial.simulate_rx(BADFRAME1)
 
     with pytest.raises(pms5003.ChecksumMismatchError):
         data = sensor.read()
+
+
+def test_checksum_fail_withretries():
+    """This simulates a good data frame, a bad data frame, then silence."""
+    _mock()
+    import pms5003
+    serial = MockSerialArbitrary()
+    serial.simulate_rx(GOODFRAME1)
+    sensor = pms5003.PMS5003(serial=serial, retries=5)
+    data1 = sensor.read()
+    assert data1.pm_ug_per_m3(2.5) == 4
+    serial.simulate_rx(BADFRAME1)
+
+    with pytest.raises(pms5003.ChecksumMismatchError):
+        data2 = sensor.read()
+
+
+def test_checksum_retries_ok():
+    """This simulates a good data frame, a bad data frame, then a good data frame."""
+    _mock()
+    import pms5003
+    serial = MockSerialArbitrary()
+    serial.simulate_rx(GOODFRAME1)
+    sensor = pms5003.PMS5003(serial=serial, retries=5)
+    data1 = sensor.read()
+    assert data1.pm_ug_per_m3(2.5) == 4
+    serial.simulate_rx(BADFRAME1)
+    serial.simulate_rx(GOODFRAME2)
+
+    # This should read the bad frame, then retry and get the the good one
+    data2 = sensor.read()
+    assert data2.pm_ug_per_m3(2.5) == 9
+    assert sensor.data_available() is False
 
 
 def test_data_checksum_pass():
@@ -343,12 +376,12 @@ def test_buffer_full_lucky():
 
 def test_buffer_full_badframelen_long1():
     """Simulates the serial object's buffer being full,
-      truncating a frame and then a good frame being appended to that stub."""
+       truncating a frame and then a good frame being appended to that stub."""
     _mock()
     import pms5003
     serial = MockSerialArbitrary(rx_buf_size=34)
     serial.simulate_rx(GOODFRAME1)
-    sensor = pms5003.PMS5003(serial=serial)
+    sensor = pms5003.PMS5003(serial=serial, retries=0)
     serial.simulate_rx(GOODFRAME1)
     data = sensor.read()
     assert data.pm_ug_per_m3(2.5) == 4
@@ -362,13 +395,13 @@ def test_buffer_full_badframelen_long1():
 
 def test_buffer_badframelen_long2():
     """Simulates the serial object's buffer being full,
-      truncating a frame and then a good frame being appended to that stub
-      resulting in a long frame length field."""
+       truncating a frame and then a good frame being appended to that stub
+       resulting in a long frame length field."""
     _mock()
     import pms5003
     serial = MockSerialArbitrary(rx_buf_size=34)
     serial.simulate_rx(GOODFRAME1)
-    sensor = pms5003.PMS5003(serial=serial)
+    sensor = pms5003.PMS5003(serial=serial, retries=0)
     serial.simulate_rx(GOODFRAME1)
     data = sensor.read()
     assert data.pm_ug_per_m3(2.5) == 4
@@ -386,13 +419,13 @@ def test_buffer_badframelen_long2():
 
 def test_buffer_full_badframelen_short():
     """Simulates the serial object's buffer being full,
-      truncating a frame and then a good frame being appended to the stub
-      resulting in a short frame length field."""
+       truncating a frame and then a good frame being appended to the stub
+       resulting in a short frame length field."""
     _mock()
     import pms5003
     serial = MockSerialArbitrary(rx_buf_size=34)
     serial.simulate_rx(GOODFRAME1)
-    sensor = pms5003.PMS5003(serial=serial)
+    sensor = pms5003.PMS5003(serial=serial, retries=0)
     serial.simulate_rx(GOODFRAME1)
     data = sensor.read()
     data.pm_ug_per_m3(2.5)
@@ -414,7 +447,7 @@ def test_active_mode_read():
     import pms5003
     serial = PMS5003Simulator()
     sensor = pms5003.PMS5003(serial=serial)
-    
+
     # The constructor waits for data but does not read it therefore this
     # will always be True after the object is created successfully
     assert sensor.data_available() is True

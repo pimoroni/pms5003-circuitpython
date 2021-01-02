@@ -188,6 +188,7 @@ class PMS5003():
                  pin_reset=pimoroni_physical_feather_pins.pin23(),
                  pin_enable=pimoroni_physical_feather_pins.pin22(),
                  mode='active',
+                 retries=5,
                  baudrate=9600
                  ):
         self._serial = None
@@ -198,6 +199,7 @@ class PMS5003():
         self._enable = None
         self._pin_reset = pin_reset
         self._reset = None
+        self._attempts = retries + 1 if retries else 1
         self.setup(serial)
 
         if mode == 'passive':
@@ -315,9 +317,19 @@ class PMS5003():
         return self._serial.in_waiting >= PMS5003Data.FRAME_LEN
 
     def read(self):
-        if self._mode == 'passive':
-            self._cmd_passive_read()
-        return self._read_data()
+        """Read a data frame. In passive mode this will transmit a request for one.
+           This will make additional attempts based on retries value in constructor
+           if there are exceptions and only raise the first exception if all fail."""
+        read_ex = None
+        for _ in range(self._attempts):
+            if self._mode == 'passive':
+                self._cmd_passive_read()
+            try:
+                return self._read_data()
+            except RuntimeError as ex:
+                if read_ex is None:
+                    read_ex = ex
+        raise read_ex if read_ex else RuntimeError("read failed - internal error")
 
     def _read_data(self, response_class=PMS5003Data):
         start = time.monotonic()

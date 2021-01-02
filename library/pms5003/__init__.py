@@ -183,6 +183,7 @@ class PMS5003():
         cmd_frame.extend(sum(cmd_frame).to_bytes(2, "big"))
         return cmd_frame
 
+
     def __init__(self,
                  serial=None,
                  pin_reset=pimoroni_physical_feather_pins.pin23(),
@@ -206,6 +207,7 @@ class PMS5003():
             self.cmd_mode_passive()
         elif mode != 'active':
             raise RuntimeError("Invalid mode")
+
 
     def cmd_mode_passive(self):
         """
@@ -244,13 +246,6 @@ class PMS5003():
             resp = self._read_data(PMS5003CmdResponse)
         time.sleep(self.MIN_CMD_INTERVAL)
         return resp
-
-    def _cmd_passive_read(self):
-        """
-        Sends command to request a data frame while in 'passive' mode and immediately reads in frame.
-        """
-        self._serial.reset_input_buffer()
-        self._serial.write(self._build_cmd_frame(PMS5003_CMD_READ))
 
     def setup(self, serial=None):
         if self._pin_enable:
@@ -365,3 +360,10 @@ class PMS5003():
             raise SerialTimeoutError("PMS5003 Read Timeout: Invalid frame length. Got {} bytes, expected {}.".format(len(raw_data), frame_length))
 
         return response_class(raw_data, frame_length_bytes=len_data)
+
+    def _cmd_passive_read(self):
+        """
+        Sends command to request a data frame while in 'passive' mode and immediately reads in frame.
+        """
+        self._serial.reset_input_buffer()
+        self._serial.write(self._build_cmd_frame(PMS5003_CMD_READ))

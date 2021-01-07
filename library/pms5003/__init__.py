@@ -201,13 +201,18 @@ class PMS5003():
         self._pin_reset = pin_reset
         self._reset = None
         self._attempts = retries + 1 if retries else 1
-        self.setup(serial)
 
-        if mode == 'passive':
-            self.cmd_mode_passive()
-        elif mode != 'active':
-            raise RuntimeError("Invalid mode")
+        if mode not in ('active', 'passive'):
+            raise ValueError("Invalid mode")
 
+        # Exceptions are caught here as constructor has not
+        # raised them in the prior versions
+        try:
+            self.setup(serial)
+            if mode == 'passive':
+                self.cmd_mode_passive()
+        except RuntimeError:
+            pass
 
     def cmd_mode_passive(self):
         """
@@ -326,6 +331,7 @@ class PMS5003():
                     read_ex = ex
         raise read_ex if read_ex else RuntimeError("read failed - internal error")
 
+
     def _read_data(self, response_class=PMS5003Data):
         start = time.monotonic()
 
@@ -357,13 +363,16 @@ class PMS5003():
 
         raw_data = bytearray(self._serial.read(frame_length))
         if len(raw_data) != frame_length:
-            raise SerialTimeoutError("PMS5003 Read Timeout: Invalid frame length. Got {} bytes, expected {}.".format(len(raw_data), frame_length))
+            raise SerialTimeoutError("PMS5003 Read Timeout: Invalid frame length. "
+                                     "Got {} bytes, expected {}.".format(len(raw_data),
+                                                                         frame_length))
 
         return response_class(raw_data, frame_length_bytes=len_data)
 
     def _cmd_passive_read(self):
         """
-        Sends command to request a data frame while in 'passive' mode and immediately reads in frame.
+        Sends command to request a data frame while in 'passive'
+        mode and immediately reads in frame.
         """
         self._serial.reset_input_buffer()
         self._serial.write(self._build_cmd_frame(PMS5003_CMD_READ))

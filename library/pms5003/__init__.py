@@ -342,12 +342,11 @@ class PMS5003():
             if elapsed > 5:
                 raise ReadTimeoutError("PMS5003 Read Timeout: Could not find start of frame")
 
-            sof = self._serial.read(1)
-            if len(sof) == 0:
+            one_byte = self._serial.read(1)
+            if one_byte is None or len(one_byte) == 0:
                 raise SerialTimeoutError("PMS5003 Read Timeout: Failed to read start of frame byte")
-            sof = ord(sof) if type(sof) is bytes else sof
 
-            if sof == PMS5003_SOF[sof_index]:
+            if ord(one_byte) == PMS5003_SOF[sof_index]:
                 if sof_index == 0:
                     sof_index = 1
                 elif sof_index == 1:
@@ -355,16 +354,17 @@ class PMS5003():
             else:
                 sof_index = 0
 
-        len_data = bytearray(self._serial.read(2))  # Get frame length packet
-        if len(len_data) != 2:
+        len_data = self._serial.read(2)  # Get frame length packet
+        if len_data is None or len(len_data) != 2:
             raise SerialTimeoutError("PMS5003 Read Timeout: Could not find length packet")
         frame_length = struct.unpack(">H", len_data)[0]
         response_class.check_data_len(frame_length, desc="Length field")
 
-        raw_data = bytearray(self._serial.read(frame_length))
-        if len(raw_data) != frame_length:
+        raw_data = self._serial.read(frame_length)
+        if raw_data is None or len(raw_data) != frame_length:
+            read_len = "TIMEOUT" if raw_data is None else len(raw_data)
             raise SerialTimeoutError("PMS5003 Read Timeout: Invalid frame length. "
-                                     "Got {} bytes, expected {}.".format(len(raw_data),
+                                     "Got {} bytes, expected {}.".format(read_len,
                                                                          frame_length))
 
         return response_class(raw_data, frame_length_bytes=len_data)
